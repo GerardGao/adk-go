@@ -111,7 +111,7 @@ var (
 // is set well above the number of consecutive thinking turns a model is expected
 // to need, so reaching it should be rare enough to warrant the log below. It is
 // a var rather than a const only so tests can exercise the boundary.
-var maxConsecutiveThoughtOnlyTurns = 10
+var maxConsecutiveThoughtOnlyTurns = 3
 
 func (f *Flow) Run(ctx agent.InvocationContext) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
