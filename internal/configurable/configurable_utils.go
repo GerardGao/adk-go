@@ -374,9 +374,9 @@ func ResolveCallbackReference(ctx context.Context, callbackName string) (any, er
 // file is only as trustworthy as whoever supplied it, and the directory of the
 // referencing config is the boundary the loader promises to stay inside.
 //
-// Absolute references are rejected outright. Relative ones are made absolute on
-// both sides before comparing, and symlinks are resolved where the paths exist,
-// so a symlink inside the agent directory cannot be used to escape it.
+// Absolute references are rejected outright. Relative ones are compared against
+// the agent directory in symlink-resolved form where that is possible, so a
+// symlink inside the directory cannot be used to point out of it.
 func resolveContainedConfigPath(parentPath, refPath string) (string, error) {
 	if refPath == "" {
 		return "", fmt.Errorf("config reference path cannot be empty")
@@ -386,28 +386,36 @@ func resolveContainedConfigPath(parentPath, refPath string) (string, error) {
 		return "", fmt.Errorf("absolute paths are not allowed in config_path: %s", refPath)
 	}
 
-	absPath, err := filepath.Abs(filepath.Join(filepath.Dir(parentPath), refPath))
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve absolute path: %w", err)
-	}
-
 	parentDir, err := filepath.Abs(filepath.Dir(parentPath))
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve agent directory: %w", err)
 	}
-	if resolved, err := filepath.EvalSymlinks(parentDir); err == nil {
-		parentDir = resolved
-	}
-	checkPath := absPath
-	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
-		checkPath = resolved
-	}
-	if !strings.HasPrefix(checkPath, parentDir+string(os.PathSeparator)) && checkPath != parentDir {
+	// Join cleans the result, so ".." segments collapse here. That settles only
+	// the textual form of the reference; symlinks are handled below.
+	absPath := filepath.Join(parentDir, refPath)
+
+	rel, err := filepath.Rel(resolveSymlinks(parentDir), resolveSymlinks(absPath))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf(
 			"path traversal detected: config_path %q resolves outside agent directory", refPath)
 	}
 
 	return absPath, nil
+}
+
+// resolveSymlinks returns the symlink-resolved form of path, or path unchanged
+// when it cannot be resolved.
+//
+// The common reason for failing to resolve is that the path does not exist yet.
+// Falling back is safe in both directions: the caller has already cleaned the
+// path, so the fallback cannot contain "..", and a path that cannot be resolved
+// cannot be read either.
+func resolveSymlinks(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return resolved
 }
 
 // ResolveAgentReference builds an agent from a reference config.

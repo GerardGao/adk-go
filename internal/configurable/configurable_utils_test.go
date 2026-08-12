@@ -142,3 +142,27 @@ func TestResolveAgentReferenceRelativeParentPath(t *testing.T) {
 		t.Error("ResolveAgentReference with a relative parent path and an escaping reference succeeded, want an error")
 	}
 }
+
+// TestResolveAgentReferenceRejectsSiblingPrefixDir covers a sibling directory
+// whose name begins with the agent directory's name. Containment has to compare
+// whole path elements, not raw string prefixes.
+func TestResolveAgentReferenceRejectsSiblingPrefixDir(t *testing.T) {
+	base, parentPath := newAgentDir(t)
+
+	siblingDir := filepath.Join(base, "agents", "root-evil")
+	if err := os.MkdirAll(siblingDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) failed: %v", siblingDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(siblingDir, "evil.yaml"), []byte("agent_class: LlmAgent\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(evil.yaml) failed: %v", err)
+	}
+
+	refPath := filepath.Join("..", "root-evil", "evil.yaml")
+	_, err := ResolveAgentReference(context.Background(), parentPath, refPath)
+	if err == nil {
+		t.Fatalf("ResolveAgentReference(_, %q, %q) succeeded, want error containing %q", parentPath, refPath, traversalError)
+	}
+	if !strings.Contains(err.Error(), traversalError) {
+		t.Errorf("ResolveAgentReference(_, %q, %q) = %v, want error containing %q", parentPath, refPath, err, traversalError)
+	}
+}
