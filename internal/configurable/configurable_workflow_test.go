@@ -748,6 +748,33 @@ func TestWorkflowNodeReferenceCheckedBeforeCache(t *testing.T) {
 	}
 }
 
+// TestWorkflowNodeReferenceRejectsThroughDanglingSymlinkedDir covers a node
+// reference through a symlinked directory whose final component does not
+// exist. realPath cannot resolve such a reference in a single EvalSymlinks
+// call and falls back to resolving the longest existing prefix and rejoining
+// the missing tail; that fallback must still see through the directory
+// symlink and reject the escape.
+func TestWorkflowNodeReferenceRejectsThroughDanglingSymlinkedDir(t *testing.T) {
+	agentDir, outsideDir := newWorkflowDirs(t)
+
+	if err := os.Symlink(outsideDir, filepath.Join(agentDir, "dirlink")); err != nil {
+		t.Skipf("symlinks are not supported in this environment: %v", err)
+	}
+
+	// "missing_join.yaml" does not exist under outsideDir, so the reference as
+	// a whole cannot be resolved by a single EvalSymlinks call.
+	ref := filepath.Join("dirlink", "missing_join.yaml")
+	wfPath := writeWorkflow(t, filepath.Join(agentDir, "dangling_wf.yaml"), "dangling_wf", ref)
+
+	_, err := FromConfig(t.Context(), wfPath)
+	if err == nil {
+		t.Fatalf("FromConfig(_, %q) with node reference %q succeeded, want error containing %q", wfPath, ref, traversalErr)
+	}
+	if !strings.Contains(err.Error(), traversalErr) {
+		t.Errorf("FromConfig(_, %q) with node reference %q = %v, want error containing %q", wfPath, ref, err, traversalErr)
+	}
+}
+
 // TestWorkflowNodeReferenceAllowsSubdirectory guards against the containment
 // check rejecting a legitimate reference below the agent directory.
 func TestWorkflowNodeReferenceAllowsSubdirectory(t *testing.T) {

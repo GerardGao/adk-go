@@ -221,3 +221,72 @@ func TestResolveAgentReferenceRejectsSiblingPrefixDir(t *testing.T) {
 		t.Errorf("ResolveAgentReference(_, %q, %q) = %v, want error containing %q", parentPath, refPath, err, traversalError)
 	}
 }
+
+// TestResolveAgentReferenceRejectsThroughDanglingSymlinkedDir covers a
+// reference through a symlinked directory whose final component does not
+// exist. realPath cannot resolve the reference in one EvalSymlinks call in
+// that case, and falls back to resolving the longest existing prefix and
+// rejoining the missing tail; that fallback must still see through the
+// directory symlink and reject the escape, rather than comparing against the
+// reference's unresolved, lexical spelling.
+func TestResolveAgentReferenceRejectsThroughDanglingSymlinkedDir(t *testing.T) {
+	base, parentPath := newAgentDir(t)
+	agentDir := filepath.Dir(parentPath)
+
+	elsewhere := filepath.Join(base, "elsewhere")
+	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) failed: %v", elsewhere, err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(agentDir, "dirlink")); err != nil {
+		t.Skipf("symlinks are not supported in this environment: %v", err)
+	}
+
+	// "missing.yaml" does not exist under elsewhere, so the reference as a
+	// whole cannot be resolved by a single EvalSymlinks call.
+	refPath := filepath.Join("dirlink", "missing.yaml")
+	_, err := ResolveAgentReference(context.Background(), parentPath, refPath)
+	if err == nil {
+		t.Fatalf("ResolveAgentReference(_, %q, %q) succeeded, want error containing %q", parentPath, refPath, traversalError)
+	}
+	if !strings.Contains(err.Error(), traversalError) {
+		t.Errorf("ResolveAgentReference(_, %q, %q) = %v, want error containing %q", parentPath, refPath, err, traversalError)
+	}
+}
+
+// TestResolveAgentReferenceCleansParentSegmentBeforeSymlinkResolution covers a
+// reference that walks into a symlinked directory and back out with ".."
+// before the final component. filepath.Join cleans "dirlink/.." away
+// textually before anything looks at the filesystem, so the reference
+// resolves as a plain sibling of the symlink inside the agent directory; the
+// symlink's target is never consulted. This matches adk-python's
+// normpath-then-realpath order and is pinned here so a future refactor does
+// not silently change which file a reference like this loads.
+func TestResolveAgentReferenceCleansParentSegmentBeforeSymlinkResolution(t *testing.T) {
+	base, parentPath := newAgentDir(t)
+	agentDir := filepath.Dir(parentPath)
+
+	elsewhere := filepath.Join(base, "elsewhere")
+	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) failed: %v", elsewhere, err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(agentDir, "dirlink")); err != nil {
+		t.Skipf("symlinks are not supported in this environment: %v", err)
+	}
+
+	refPath := filepath.Join("dirlink", "..", "sub_agent.yaml")
+	_, err := ResolveAgentReference(context.Background(), parentPath, refPath)
+	if err != nil && strings.Contains(err.Error(), traversalError) {
+		t.Errorf("ResolveAgentReference(_, %q, %q) = %v, want no traversal rejection", parentPath, refPath, err)
+	}
+}
+
+// TestResolveAgentReferenceRejectsEmptyPath covers the empty reference, which
+// must be rejected outright rather than falling through to filepath.Dir's "."
+// and silently resolving to the agent directory itself.
+func TestResolveAgentReferenceRejectsEmptyPath(t *testing.T) {
+	_, parentPath := newAgentDir(t)
+
+	if _, err := ResolveAgentReference(context.Background(), parentPath, ""); err == nil {
+		t.Error("ResolveAgentReference with an empty reference succeeded, want an error")
+	}
+}
