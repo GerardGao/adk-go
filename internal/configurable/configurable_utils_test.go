@@ -143,6 +143,61 @@ func TestResolveAgentReferenceRelativeParentPath(t *testing.T) {
 	}
 }
 
+// TestResolveAgentReferenceFollowsSymlinkInsideDir guards against the
+// containment check being too strict: a symlink that stays inside the agent
+// directory is a legitimate way to organise configs, and adk-python allows it.
+func TestResolveAgentReferenceFollowsSymlinkInsideDir(t *testing.T) {
+	_, parentPath := newAgentDir(t)
+	agentDir := filepath.Dir(parentPath)
+
+	if err := os.Symlink("sub_agent.yaml", filepath.Join(agentDir, "alias.yaml")); err != nil {
+		t.Skipf("symlinks are not supported in this environment: %v", err)
+	}
+
+	_, err := ResolveAgentReference(context.Background(), parentPath, "alias.yaml")
+	if err != nil && strings.Contains(err.Error(), traversalError) {
+		t.Errorf("ResolveAgentReference(_, %q, %q) = %v, want no traversal rejection", parentPath, "alias.yaml", err)
+	}
+}
+
+// TestResolveAgentReferenceMissingFileIsNotTraversal covers a reference to a
+// config that does not exist. Canonicalisation cannot resolve it, but a typo
+// must report the missing file rather than a containment failure, which is what
+// os.path.realpath gives adk-python for free.
+func TestResolveAgentReferenceMissingFileIsNotTraversal(t *testing.T) {
+	_, parentPath := newAgentDir(t)
+
+	_, err := ResolveAgentReference(context.Background(), parentPath, filepath.Join("nodes", "typo.yaml"))
+	if err == nil {
+		t.Fatal("ResolveAgentReference for a missing config succeeded, want an error")
+	}
+	if strings.Contains(err.Error(), traversalError) {
+		t.Errorf("ResolveAgentReference for a missing config = %v, want a not-found error", err)
+	}
+	if !strings.Contains(err.Error(), "config file not found") {
+		t.Errorf("ResolveAgentReference for a missing config = %v, want a not-found error", err)
+	}
+}
+
+// TestResolveAgentReferenceThroughSymlinkedAgentDir covers an agent directory
+// reached through a symlink. Both sides are canonicalised, so a reference
+// inside it must still resolve.
+func TestResolveAgentReferenceThroughSymlinkedAgentDir(t *testing.T) {
+	base, parentPath := newAgentDir(t)
+	agentDir := filepath.Dir(parentPath)
+
+	linkedDir := filepath.Join(base, "linked_root")
+	if err := os.Symlink(agentDir, linkedDir); err != nil {
+		t.Skipf("symlinks are not supported in this environment: %v", err)
+	}
+
+	viaLink := filepath.Join(linkedDir, "root_agent.yaml")
+	_, err := ResolveAgentReference(context.Background(), viaLink, "sub_agent.yaml")
+	if err != nil && strings.Contains(err.Error(), traversalError) {
+		t.Errorf("ResolveAgentReference(_, %q, %q) = %v, want no traversal rejection", viaLink, "sub_agent.yaml", err)
+	}
+}
+
 // TestResolveAgentReferenceRejectsSiblingPrefixDir covers a sibling directory
 // whose name begins with the agent directory's name. Containment has to compare
 // whole path elements, not raw string prefixes.
