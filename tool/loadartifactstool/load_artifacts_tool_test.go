@@ -339,6 +339,31 @@ func TestLoadArtifactsTool_ProcessRequest_Artifacts_OtherFunctionCall(t *testing
 	}
 }
 
+// TestLoadArtifactsTool_ProcessRequest_NilArtifacts verifies that ProcessRequest
+// returns a descriptive error instead of panicking when no artifact service is
+// configured (see https://github.com/google/adk-go/issues/283).
+func TestLoadArtifactsTool_ProcessRequest_NilArtifacts(t *testing.T) {
+	loadArtifactsTool := loadartifactstool.New()
+
+	// Construct a context with no artifact service configured.
+	invocationCtx := icontext.NewInvocationContext(t.Context(), icontext.InvocationContextParams{})
+	tc := agent.NewToolContext(invocationCtx, "", nil, nil)
+
+	requestProcessor, ok := loadArtifactsTool.(toolinternal.RequestProcessor)
+	if !ok {
+		t.Fatal("loadArtifactsTool does not implement RequestProcessor")
+	}
+
+	llmRequest := &model.LLMRequest{}
+	err := requestProcessor.ProcessRequest(tc, llmRequest)
+	if err == nil {
+		t.Fatal("ProcessRequest should return an error when no artifact service is configured, but got nil")
+	}
+	if !strings.Contains(err.Error(), "artifact service") {
+		t.Errorf("error should mention the missing artifact service, got: %v", err)
+	}
+}
+
 func createToolContext(t *testing.T) agent.Context {
 	t.Helper()
 

@@ -128,7 +128,11 @@ func (t *artifactsTool) ProcessRequest(ctx agent.Context, req *model.LLMRequest)
 }
 
 func (t *artifactsTool) appendInitialInstructions(ctx agent.Context, req *model.LLMRequest) error {
-	resp, err := ctx.Artifacts().List(ctx)
+	artifacts := ctx.Artifacts()
+	if artifacts == nil {
+		return fmt.Errorf("load_artifacts tool requires an artifact service to be configured")
+	}
+	resp, err := artifacts.List(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list artifacts: %w", err)
 	}
