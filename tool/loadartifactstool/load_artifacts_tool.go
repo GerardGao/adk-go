@@ -118,6 +118,9 @@ func (t *artifactsTool) Run(ctx agent.Context, args any) (map[string]any, error)
 // ProcessRequest processes the LLM request. It packs the tool, appends initial
 // instructions, and processes any load artifacts function calls.
 func (t *artifactsTool) ProcessRequest(ctx agent.Context, req *model.LLMRequest) error {
+	if ctx.Artifacts() == nil {
+		return fmt.Errorf("load_artifacts tool requires an artifact service to be configured")
+	}
 	if err := toolutils.PackTool(req, t); err != nil {
 		return err
 	}
@@ -128,11 +131,7 @@ func (t *artifactsTool) ProcessRequest(ctx agent.Context, req *model.LLMRequest)
 }
 
 func (t *artifactsTool) appendInitialInstructions(ctx agent.Context, req *model.LLMRequest) error {
-	artifacts := ctx.Artifacts()
-	if artifacts == nil {
-		return fmt.Errorf("load_artifacts tool requires an artifact service to be configured")
-	}
-	resp, err := artifacts.List(ctx)
+	resp, err := ctx.Artifacts().List(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list artifacts: %w", err)
 	}

@@ -364,6 +364,50 @@ func TestLoadArtifactsTool_ProcessRequest_NilArtifacts(t *testing.T) {
 	}
 }
 
+// TestLoadArtifactsTool_ProcessRequest_NilArtifacts_WithFunctionCall verifies
+// that the nil-artifact guard in ProcessRequest also covers the
+// processLoadArtifactsFunctionCall path, not only appendInitialInstructions:
+// with a request whose last content is a load_artifacts function response,
+// ProcessRequest must still return the descriptive error instead of panicking
+// on the unguarded ctx.Artifacts() read in that path.
+func TestLoadArtifactsTool_ProcessRequest_NilArtifacts_WithFunctionCall(t *testing.T) {
+	loadArtifactsTool := loadartifactstool.New()
+
+	// Construct a context with no artifact service configured.
+	invocationCtx := icontext.NewInvocationContext(t.Context(), icontext.InvocationContextParams{})
+	tc := agent.NewToolContext(invocationCtx, "", nil, nil)
+
+	functionResponse := &genai.FunctionResponse{
+		Name: "load_artifacts",
+		Response: map[string]any{
+			"artifact_names": []any{"doc1.txt"},
+		},
+	}
+	llmRequest := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					genai.NewPartFromFunctionResponse(functionResponse.Name, functionResponse.Response),
+				},
+			},
+		},
+	}
+
+	requestProcessor, ok := loadArtifactsTool.(toolinternal.RequestProcessor)
+	if !ok {
+		t.Fatal("loadArtifactsTool does not implement RequestProcessor")
+	}
+
+	err := requestProcessor.ProcessRequest(tc, llmRequest)
+	if err == nil {
+		t.Fatal("ProcessRequest should return an error when no artifact service is configured, but got nil")
+	}
+	if !strings.Contains(err.Error(), "artifact service") {
+		t.Errorf("error should mention the missing artifact service, got: %v", err)
+	}
+}
+
 func createToolContext(t *testing.T) agent.Context {
 	t.Helper()
 
